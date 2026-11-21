@@ -5,14 +5,22 @@ Write-Host "==========================================================" -Foregro
 Write-Host "       NeoResonance - Windows 11 Desktop Overlay Widget   " -ForegroundColor Magenta
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# Check if target binary exists, if not build it
-if (!(Test-Path "src-tauri\target\debug\neo-resonance.exe")) {
-    Write-Host "Building NeoResonance..." -ForegroundColor Yellow
-    npm run build
-    cd src-tauri
-    cargo build
-    cd ..
+$exePath = "NeoResonance.exe"
+if (!(Test-Path $exePath)) {
+    $exePath = "src-tauri\target\release\neo-resonance.exe"
+}
+if (!(Test-Path $exePath)) {
+    $exePath = "src-tauri\target\debug\neo-resonance.exe"
 }
 
-Write-Host "Starting NeoResonance on Desktop..." -ForegroundColor Green
-Start-Process "src-tauri\target\debug\neo-resonance.exe"
+if (!(Test-Path $exePath)) {
+    Write-Host "Building NeoResonance production release..." -ForegroundColor Yellow
+    npm run build
+    cd src-tauri
+    cargo build --release
+    cd ..
+    $exePath = "src-tauri\target\release\neo-resonance.exe"
+}
+
+Write-Host "Launching NeoResonance ($exePath)..." -ForegroundColor Green
+Start-Process $exePath
