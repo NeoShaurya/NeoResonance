@@ -8,6 +8,14 @@ NeoResonance sits directly on the Windows 11 desktop wallpaper layer, controls p
 
 ---
 
+## Download
+
+Grab the latest standalone `.exe` from [Releases](https://github.com/NeoShaurya/NeoResonance/releases/latest):
+- **Direct Download:** [**NeoResonance.exe (v0.1.0)**](https://github.com/NeoShaurya/NeoResonance/releases/download/v0.1.0/NeoResonance.exe)
+- Portable single binary (no installer required).
+
+---
+
 ## Key Features
 
 1. **Windows 11 Desktop Overlay & Pinning (`src-tauri/src/window.rs`)**
