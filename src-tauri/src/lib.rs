@@ -4,7 +4,7 @@ pub mod lyrics;
 pub mod smtc;
 pub mod window;
 
-use config::{load_config, ConfigState};
+use config::{load_config, save_config_to_disk, ConfigState};
 use lyrics::LyricsCache;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -62,6 +62,19 @@ pub fn run() {
             log("Setup complete, returning Ok(())");
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Moved(pos) = event {
+                let app = window.app_handle();
+                if let Some(state) = app.try_state::<ConfigState>() {
+                    let mut cfg = state.0.lock().unwrap();
+                    if !cfg.locked {
+                        cfg.x = Some(pos.x);
+                        cfg.y = Some(pos.y);
+                        save_config_to_disk(app, &cfg);
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             config::get_widget_config,
             config::save_widget_position,
@@ -69,6 +82,8 @@ pub fn run() {
             config::toggle_widget_locked,
             config::toggle_widget_aura,
             config::toggle_widget_lyrics,
+            window::start_window_drag,
+            window::reset_widget_position,
             smtc::get_smtc_state,
             smtc::media_play_pause,
             smtc::media_next,

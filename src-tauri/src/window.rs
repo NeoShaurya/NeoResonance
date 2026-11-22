@@ -28,12 +28,21 @@ pub fn setup_desktop_window(window: &WebviewWindow, config: &WidgetConfig) {
             if let (Some(x), Some(y)) = (config.x, config.y) {
                 let _ = window.set_position(PhysicalPosition::new(x, y));
             } else {
-                // Default position: lower right desktop region
+                // Default position: lower right desktop region, DPI-aware and taskbar-safe
                 if let Ok(Some(monitor)) = window.current_monitor() {
-                    let size = monitor.size();
-                    let default_x = (size.width as i32) - 760;
-                    let default_y = (size.height as i32) - 480;
-                    let _ = window.set_position(PhysicalPosition::new(default_x, default_y));
+                    let scale_factor = monitor.scale_factor();
+                    let monitor_size = monitor.size();
+
+                    let win_phys_w = (720.0 * scale_factor) as i32;
+                    let win_phys_h = (430.0 * scale_factor) as i32;
+
+                    let margin_right = (32.0 * scale_factor) as i32;
+                    let margin_bottom = (70.0 * scale_factor) as i32; // clearance for taskbar + spacing
+
+                    let default_x = (monitor_size.width as i32) - win_phys_w - margin_right;
+                    let default_y = (monitor_size.height as i32) - win_phys_h - margin_bottom;
+
+                    let _ = window.set_position(PhysicalPosition::new(default_x.max(20), default_y.max(20)));
                 }
             }
 
@@ -53,12 +62,15 @@ pub fn setup_desktop_window(window: &WebviewWindow, config: &WidgetConfig) {
 
 pub fn setup_system_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let lock_item = MenuItemBuilder::with_id("toggle_lock", "Lock / Unlock Position").build(app)?;
+    let reset_pos_item = MenuItemBuilder::with_id("reset_pos", "Reset Position (Center)").build(app)?;
     let aura_item = MenuItemBuilder::with_id("toggle_aura", "Toggle Aura / Wave").build(app)?;
     let lyrics_item = MenuItemBuilder::with_id("toggle_lyrics", "Toggle Synced Lyrics").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
     let menu = MenuBuilder::new(app)
         .item(&lock_item)
+        .item(&reset_pos_item)
+        .separator()
         .item(&aura_item)
         .item(&lyrics_item)
         .separator()
@@ -89,6 +101,20 @@ pub fn setup_system_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
                     cfg.locked = !cfg.locked;
                     save_config_to_disk(app, &cfg);
                     let _ = app.emit("config_changed", cfg.clone());
+                }
+                "reset_pos" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.center();
+                        if let Ok(pos) = window.outer_position() {
+                            let state = app.state::<ConfigState>();
+                            let mut cfg = state.0.lock().unwrap();
+                            cfg.x = Some(pos.x);
+                            cfg.y = Some(pos.y);
+                            cfg.locked = false;
+                            save_config_to_disk(app, &cfg);
+                            let _ = app.emit("config_changed", cfg.clone());
+                        }
+                    }
                 }
                 "toggle_aura" => {
                     let state = app.state::<ConfigState>();
@@ -128,3 +154,27 @@ pub fn setup_system_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
 
     Ok(())
 }
+
+#[tauri::command]
+pub fn start_window_drag(window: WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reset_widget_position(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: tauri::State<'_, ConfigState>,
+) -> Result<(), String> {
+    let _ = window.center();
+    if let Ok(pos) = window.outer_position() {
+        let mut cfg = state.0.lock().unwrap();
+        cfg.x = Some(pos.x);
+        cfg.y = Some(pos.y);
+        cfg.locked = false;
+        save_config_to_disk(&app, &cfg);
+        let _ = app.emit("config_changed", cfg.clone());
+    }
+    Ok(())
+}
+

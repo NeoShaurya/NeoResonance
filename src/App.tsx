@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { useSmtc } from "./hooks/useSmtc";
 import { useAudio } from "./hooks/useAudio";
 import { useLyrics } from "./hooks/useLyrics";
@@ -16,7 +17,7 @@ export default function App() {
   const { state: smtc, isPlaying, playPause, next, prev, seek } = useSmtc();
   const audio = useAudio();
   const lyricsProgress = useLyrics(smtc);
-  const { config, toggleLock, savePosition } = useConfig();
+  const { config, toggleLock } = useConfig();
 
   const [palette, setPalette] = useState<AuraPalette>({
     primary: "rgba(139, 92, 246, 0.65)",
@@ -45,12 +46,15 @@ export default function App() {
     }
 
     try {
-      const appWindow = getCurrentWindow();
-      await appWindow.startDragging();
-      const pos = await appWindow.outerPosition();
-      savePosition(pos.x, pos.y);
-    } catch (err) {
-      console.warn("Failed to drag window:", err);
+      // Direct native Rust dragging command
+      await invoke("start_window_drag");
+    } catch {
+      try {
+        const appWindow = getCurrentWindow();
+        await appWindow.startDragging();
+      } catch (err) {
+        console.warn("Failed to drag window:", err);
+      }
     }
   };
 
@@ -67,6 +71,7 @@ export default function App() {
     >
       {/* The "Glass Ribbon" Capsule */}
       <div
+        data-tauri-drag-region={!config.locked ? "" : undefined}
         onMouseDown={handleMouseDown}
         className={`relative w-full max-w-[690px] h-[390px] rounded-[28px] p-5 flex flex-col justify-between overflow-hidden transition-all duration-300 ${
           config.locked
