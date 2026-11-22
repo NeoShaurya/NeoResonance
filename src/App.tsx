@@ -73,7 +73,7 @@ export default function App() {
       <div
         data-tauri-drag-region={!config.locked ? "" : undefined}
         onMouseDown={handleMouseDown}
-        className={`relative w-full max-w-[690px] h-[280px] rounded-[24px] px-5 py-3.5 flex flex-col justify-between overflow-hidden transition-all duration-300 ${
+        className={`relative w-full max-w-[550px] h-[245px] rounded-[20px] px-4 py-3 flex flex-col justify-between overflow-hidden transition-all duration-300 ${
           config.locked
             ? "border border-white/[0.13] shadow-[0_24px_50px_rgba(0,0,0,0.65),_inset_0_1px_0_0_rgba(255,255,255,0.18)]"
             : "border-2 border-dashed border-cyan-400/60 shadow-[0_0_35px_rgba(6,182,212,0.35)] cursor-move"

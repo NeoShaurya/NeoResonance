@@ -3,7 +3,17 @@
 
 fn main() {
     std::panic::set_hook(Box::new(|info| {
-        let _ = std::fs::write("C:\\Users\\shaur\\NeoResonance\\panic.txt", format!("{:?}", info));
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown payload type".to_string()
+        };
+        let _ = std::fs::write(
+            "C:\\Users\\shaur\\NeoResonance\\panic_detail.txt",
+            format!("PANIC: {}\nLocation: {:?}", payload, info.location()),
+        );
     }));
 
     neo_resonance_lib::run();

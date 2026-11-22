@@ -34,3 +34,4 @@ widget_config.json
 *.njsproj
 *.sln
 *.sw?
+panic*.txt

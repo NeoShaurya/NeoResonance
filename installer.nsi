@@ -1,18 +1,28 @@
 Unicode true
 Name "NeoResonance"
-OutFile "C:\Users\shaur\NeoResonance\NeoResonance-Setup-v0.1.5.exe"
+OutFile "C:\Users\shaur\NeoResonance\NeoResonance-Setup-v0.1.6.exe"
 InstallDir "$LOCALAPPDATA\Programs\NeoResonance"
 RequestExecutionLevel user
+
+Function .onInit
+    ; Force kill any running instances and child webviews before installation
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /f /t /im NeoResonance.exe'
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /f /t /im neo-resonance.exe'
+    Sleep 1000
+FunctionEnd
 
 Page directory
 Page instfiles
 
 Section "Install"
-    nsExec::Exec 'taskkill /F /IM NeoResonance.exe'
-    nsExec::Exec 'taskkill /F /IM neo-resonance.exe'
-    Sleep 500
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /f /t /im NeoResonance.exe'
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /f /t /im neo-resonance.exe'
+    Sleep 1000
 
     SetOutPath "$INSTDIR"
+    Delete "$INSTDIR\NeoResonance.exe"
+    Delete "$INSTDIR\WebView2Loader.dll"
+
     File /oname=NeoResonance.exe "C:\Users\shaur\NeoResonance\src-tauri\target\release\neo-resonance.exe"
     File "C:\Users\shaur\NeoResonance\src-tauri\target\release\WebView2Loader.dll"
     
@@ -25,9 +35,9 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
-    nsExec::Exec 'taskkill /F /IM NeoResonance.exe'
-    nsExec::Exec 'taskkill /F /IM neo-resonance.exe'
-    Sleep 500
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /f /t /im NeoResonance.exe'
+    ExecWait '"$SYSDIR\cmd.exe" /c taskkill /f /t /im neo-resonance.exe'
+    Sleep 1000
 
     Delete "$DESKTOP\NeoResonance.lnk"
     Delete "$SMPROGRAMS\NeoResonance\NeoResonance.lnk"

@@ -30,6 +30,15 @@ export function useLyrics(smtc: SmtcState) {
   useEffect(() => {
     if (!smtc.title || smtc.title === "No Media Playing") {
       setLyrics(null);
+      setProgress({
+        currentLine: null,
+        upcomingLine: null,
+        activeWordIndex: -1,
+        interpolatedWordFraction: 0,
+        isSynced: false,
+        hasLyrics: false,
+        currentTimeMs: 0,
+      });
       lastTrackKey.current = "";
       return;
     }
@@ -37,6 +46,18 @@ export function useLyrics(smtc: SmtcState) {
     const trackKey = `${smtc.artist.trim().toLowerCase()} - ${smtc.title.trim().toLowerCase()}`;
     if (trackKey === lastTrackKey.current) return;
     lastTrackKey.current = trackKey;
+
+    // Immediately clear stale lyrics from previous song
+    setLyrics(null);
+    setProgress({
+      currentLine: null,
+      upcomingLine: null,
+      activeWordIndex: -1,
+      interpolatedWordFraction: 0,
+      isSynced: false,
+      hasLyrics: false,
+      currentTimeMs: smtc.position_ms,
+    });
 
     const durationSec = Math.floor(smtc.duration_ms / 1000);
 
@@ -47,7 +68,10 @@ export function useLyrics(smtc: SmtcState) {
       durationSec: durationSec > 0 ? durationSec : null,
     })
       .then((res) => {
-        setLyrics(res);
+        // Guard against race conditions: only apply if this matches the currently playing track!
+        if (res.track_key.toLowerCase() === trackKey) {
+          setLyrics(res);
+        }
       })
       .catch((err) => {
         console.warn("Failed to get lyrics:", err);

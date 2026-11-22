@@ -23,10 +23,10 @@ export const AuraBackplate: React.FC<AuraBackplateProps> = ({
   const midOpacity = 0.45 + midEnergy * 0.4;
 
   return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-[24px] -z-10">
+    <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-[20px] -z-10">
       {/* Dynamic Purple/Violet Bass Cloud (Left/Center) */}
       <div
-        className="absolute w-[330px] h-[240px] -left-10 -bottom-12 rounded-full blur-[55px] transition-transform duration-100 ease-out will-change-transform"
+        className="absolute w-[270px] h-[190px] -left-8 -bottom-10 rounded-full blur-[45px] transition-transform duration-100 ease-out will-change-transform"
         style={{
           background: palette.primary,
           transform: `scale(${bassScale}) translate(${bassEnergy * 8}px, ${-bassEnergy * 6}px)`,
@@ -36,7 +36,7 @@ export const AuraBackplate: React.FC<AuraBackplateProps> = ({
 
       {/* Dynamic Electric Cyan/Blue Mid Cloud (Right/Center) */}
       <div
-        className="absolute w-[340px] h-[250px] right-2 top-4 rounded-full blur-[60px] transition-transform duration-100 ease-out will-change-transform"
+        className="absolute w-[280px] h-[200px] right-2 top-2 rounded-full blur-[50px] transition-transform duration-100 ease-out will-change-transform"
         style={{
           background: palette.secondary,
           transform: `scale(${midScale}) translate(${-midEnergy * 6}px, ${midEnergy * 8}px)`,
@@ -46,7 +46,7 @@ export const AuraBackplate: React.FC<AuraBackplateProps> = ({
 
       {/* Ambient Accent Magenta/Teal Cloud (Center Stage) */}
       <div
-        className="absolute w-[250px] h-[200px] left-1/3 top-1/4 rounded-full blur-[65px] transition-opacity duration-200 ease-out will-change-transform"
+        className="absolute w-[200px] h-[150px] left-1/3 top-1/4 rounded-full blur-[50px] transition-opacity duration-200 ease-out will-change-transform"
         style={{
           background: palette.accent,
           transform: `scale(${1.0 + (bassEnergy + midEnergy) * 0.15})`,

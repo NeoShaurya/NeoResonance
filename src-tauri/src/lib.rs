@@ -63,16 +63,22 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Moved(pos) = event {
-                let app = window.app_handle();
-                if let Some(state) = app.try_state::<ConfigState>() {
-                    let mut cfg = state.0.lock().unwrap();
-                    if !cfg.locked {
-                        cfg.x = Some(pos.x);
-                        cfg.y = Some(pos.y);
-                        save_config_to_disk(app, &cfg);
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                }
+                tauri::WindowEvent::Moved(pos) => {
+                    let app = window.app_handle();
+                    if let Some(state) = app.try_state::<ConfigState>() {
+                        let mut cfg = state.0.lock().unwrap();
+                        if !cfg.locked {
+                            cfg.x = Some(pos.x);
+                            cfg.y = Some(pos.y);
+                            save_config_to_disk(app, &cfg);
+                        }
                     }
                 }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![

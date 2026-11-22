@@ -19,11 +19,11 @@ export const LyricsDisplay: React.FC<LyricsDisplayProps> = React.memo(({
   const { currentLine, upcomingLine, activeWordIndex } = progress;
 
   return (
-    <div className="flex flex-col justify-center items-start w-full min-h-[85px] px-2 py-1 select-none">
+    <div className="flex flex-col justify-center items-start w-full min-h-[72px] px-1.5 py-0.5 select-none">
       {currentLine ? (
         <div className="flex flex-col space-y-1 transition-all duration-300 ease-out w-full">
           {/* Active Focused Line (Karaoke Glow) */}
-          <div className="text-[18px] md:text-[20px] font-bold tracking-tight text-white/90 leading-snug flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <div className="text-[16.5px] md:text-[18px] font-bold tracking-tight text-white/90 leading-snug flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             {currentLine.words && currentLine.words.length > 0 ? (
               currentLine.words.map((word, idx) => {
                 const isPast = idx < activeWordIndex;
@@ -56,7 +56,7 @@ export const LyricsDisplay: React.FC<LyricsDisplayProps> = React.memo(({
 
           {/* Upcoming Preview Line */}
           {upcomingLine && (
-            <div className="text-[12px] font-medium text-white/30 tracking-tight transition-all duration-500 ease-out truncate max-w-full">
+            <div className="text-[11.5px] font-medium text-white/30 tracking-tight transition-all duration-500 ease-out truncate max-w-full">
               {upcomingLine.text}
             </div>
           )}
@@ -64,22 +64,22 @@ export const LyricsDisplay: React.FC<LyricsDisplayProps> = React.memo(({
       ) : upcomingLine ? (
         /* Intro before lyrics begin */
         <div className="flex flex-col space-y-1 transition-all duration-300 ease-out">
-          <div className="text-[18px] font-bold text-white/50 tracking-tight animate-pulse">
+          <div className="text-[16.5px] font-bold text-white/50 tracking-tight animate-pulse">
             •••
           </div>
-          <div className="text-[12px] font-medium text-white/35 tracking-tight">
+          <div className="text-[11.5px] font-medium text-white/35 tracking-tight">
             {upcomingLine.text}
           </div>
         </div>
       ) : (
         /* Idle / No lyrics state */
         <div className="flex flex-col space-y-0.5 text-white/40">
-          <div className="text-[16px] font-medium tracking-tight text-white/60">
+          <div className="text-[15px] font-medium tracking-tight text-white/60">
             {trackTitle && trackTitle !== "No Media Playing"
               ? trackTitle
               : "No Media Playing"}
           </div>
-          <div className="text-[11.5px] text-white/30">
+          <div className="text-[11px] text-white/30">
             {artist ? `Listening on Windows • ${artist}` : "Ready for audio playback"}
           </div>
         </div>

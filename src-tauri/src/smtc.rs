@@ -75,7 +75,7 @@ fn extract_album_art(session: &GlobalSystemMediaTransportControlsSession) -> Opt
     let thumb_ref = media_props.Thumbnail().ok()?;
     let stream = thumb_ref.OpenReadAsync().ok()?.get().ok()?;
     let size = stream.Size().ok()? as u32;
-    if size == 0 {
+    if size == 0 || size > 10_000_000 {
         return None;
     }
 

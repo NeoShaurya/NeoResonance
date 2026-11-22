@@ -33,8 +33,8 @@ pub fn setup_desktop_window(window: &WebviewWindow, config: &WidgetConfig) {
                     let scale_factor = monitor.scale_factor();
                     let monitor_size = monitor.size();
 
-                    let win_phys_w = (720.0 * scale_factor) as i32;
-                    let win_phys_h = (310.0 * scale_factor) as i32;
+                    let win_phys_w = (576.0 * scale_factor) as i32;
+                    let win_phys_h = (270.0 * scale_factor) as i32;
 
                     let margin_right = (32.0 * scale_factor) as i32;
                     let margin_bottom = (70.0 * scale_factor) as i32; // clearance for taskbar + spacing

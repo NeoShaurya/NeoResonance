@@ -32,12 +32,38 @@ impl Default for LyricsCache {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct LrcLibRecord {
+    #[serde(rename = "trackName")]
+    track_name: Option<String>,
+    #[serde(rename = "artistName")]
+    artist_name: Option<String>,
     #[serde(rename = "syncedLyrics")]
     synced_lyrics: Option<String>,
     #[serde(rename = "plainLyrics")]
     plain_lyrics: Option<String>,
+    duration: Option<f64>,
+}
+
+fn clean_query_string(s: &str) -> String {
+    let mut cleaned = s.trim().to_string();
+    let patterns = [
+        " - single", " - ep", " - deluxe", " - remastered",
+        " (deluxe)", " [deluxe]", " (deluxe edition)", " [deluxe edition]",
+        " (deluxe version)", " [deluxe version]",
+        " (official video)", " (official music video)", " (official audio)",
+        " [official video]", " [official music video]", " [official audio]",
+        " (lyrics)", " [lyrics]", " (audio)", " [audio]",
+        " (remastered)", " [remastered]", " (feat.", " [feat.", " (ft.", " [ft."
+    ];
+    let lower = cleaned.to_lowercase();
+    for pat in patterns {
+        if let Some(idx) = lower.find(pat) {
+            cleaned = cleaned[..idx].trim().to_string();
+            break;
+        }
+    }
+    cleaned
 }
 
 fn parse_timestamp(ts: &str) -> Option<u64> {
@@ -224,30 +250,34 @@ pub async fn get_lyrics(
     }
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(4))
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Primary lookup
-    let mut url = format!(
+    let clean_title = clean_query_string(&title);
+    let clean_artist = clean_query_string(&artist);
+    let clean_album = album.as_deref().map(clean_query_string);
+
+    let mut lrc_content: Option<String> = None;
+
+    // --- LEVEL 1: Exact /api/get with album and duration ---
+    let mut url1 = format!(
         "https://lrclib.net/api/get?artist_name={}&track_name={}",
-        urlencoding::encode(&artist),
-        urlencoding::encode(&title)
+        urlencoding::encode(&clean_artist),
+        urlencoding::encode(&clean_title)
     );
-    if let Some(ref alb) = album {
+    if let Some(ref alb) = clean_album {
         if !alb.is_empty() {
-            url.push_str(&format!("&album_name={}", urlencoding::encode(alb)));
+            url1.push_str(&format!("&album_name={}", urlencoding::encode(alb)));
         }
     }
     if let Some(dur) = duration_sec {
         if dur > 0 {
-            url.push_str(&format!("&duration={}", dur));
+            url1.push_str(&format!("&duration={}", dur));
         }
     }
 
-    let mut lrc_content: Option<String> = None;
-
-    if let Ok(resp) = client.get(&url).send().await {
+    if let Ok(resp) = client.get(&url1).send().await {
         if resp.status().is_success() {
             if let Ok(record) = resp.json::<LrcLibRecord>().await {
                 lrc_content = record.synced_lyrics.or(record.plain_lyrics);
@@ -255,23 +285,87 @@ pub async fn get_lyrics(
         }
     }
 
-    // Fallback search if primary returned nothing
+    // --- LEVEL 2: Direct /api/get with artist and title only (ignores album/duration mismatch) ---
+    if lrc_content.is_none() {
+        let url2 = format!(
+            "https://lrclib.net/api/get?artist_name={}&track_name={}",
+            urlencoding::encode(&clean_artist),
+            urlencoding::encode(&clean_title)
+        );
+        if let Ok(resp) = client.get(&url2).send().await {
+            if resp.status().is_success() {
+                if let Ok(record) = resp.json::<LrcLibRecord>().await {
+                    lrc_content = record.synced_lyrics.or(record.plain_lyrics);
+                }
+            }
+        }
+    }
+
+    // --- LEVEL 3: Targeted /api/search?track_name=...&artist_name=... ---
     if lrc_content.is_none() {
         let search_url = format!(
-            "https://lrclib.net/api/search?q={}+{}",
-            urlencoding::encode(&artist),
-            urlencoding::encode(&title)
+            "https://lrclib.net/api/search?track_name={}&artist_name={}",
+            urlencoding::encode(&clean_title),
+            urlencoding::encode(&clean_artist)
         );
 
         if let Ok(resp) = client.get(&search_url).send().await {
             if resp.status().is_success() {
                 if let Ok(records) = resp.json::<Vec<LrcLibRecord>>().await {
+                    let target_lower = clean_title.to_lowercase();
+                    // Prefer records matching title and having synced lyrics
+                    let mut best_record: Option<&LrcLibRecord> = None;
+                    let mut best_dur_diff = f64::MAX;
+
+                    for r in &records {
+                        let t_name = r.track_name.as_deref().unwrap_or("").to_lowercase();
+                        if t_name.contains(&target_lower) || target_lower.contains(&t_name) {
+                            if r.synced_lyrics.is_some() {
+                                if let (Some(dur), Some(target_dur)) = (r.duration, duration_sec) {
+                                    let diff = (dur - target_dur as f64).abs();
+                                    if diff < best_dur_diff {
+                                        best_dur_diff = diff;
+                                        best_record = Some(r);
+                                    }
+                                } else if best_record.is_none() {
+                                    best_record = Some(r);
+                                }
+                            } else if best_record.is_none() && r.plain_lyrics.is_some() {
+                                best_record = Some(r);
+                            }
+                        }
+                    }
+
+                    if let Some(r) = best_record {
+                        lrc_content = r.synced_lyrics.clone().or_else(|| r.plain_lyrics.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // --- LEVEL 4: Fallback /api/search?q=... with STRICT title verification ---
+    if lrc_content.is_none() {
+        let search_url = format!(
+            "https://lrclib.net/api/search?q={}+{}",
+            urlencoding::encode(&clean_artist),
+            urlencoding::encode(&clean_title)
+        );
+
+        if let Ok(resp) = client.get(&search_url).send().await {
+            if resp.status().is_success() {
+                if let Ok(records) = resp.json::<Vec<LrcLibRecord>>().await {
+                    let target_lower = clean_title.to_lowercase();
                     for r in records {
-                        if r.synced_lyrics.is_some() {
-                            lrc_content = r.synced_lyrics;
-                            break;
-                        } else if lrc_content.is_none() && r.plain_lyrics.is_some() {
-                            lrc_content = r.plain_lyrics;
+                        let t_name = r.track_name.as_deref().unwrap_or("").to_lowercase();
+                        // CRITICAL: Only accept if the returned record actually matches the track title!
+                        if t_name.contains(&target_lower) || target_lower.contains(&t_name) {
+                            if r.synced_lyrics.is_some() {
+                                lrc_content = r.synced_lyrics;
+                                break;
+                            } else if lrc_content.is_none() && r.plain_lyrics.is_some() {
+                                lrc_content = r.plain_lyrics;
+                            }
                         }
                     }
                 }
