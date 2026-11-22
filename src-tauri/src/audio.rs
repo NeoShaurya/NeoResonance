@@ -295,11 +295,11 @@ fn run_wasapi_capture(channel: Channel<AudioTelemetry>) {
                 break 'outer;
             }
 
-            // If prolonged silence, throttle loop to 50ms to save CPU
+            // If prolonged silence, throttle loop to 100ms to save CPU; otherwise ~30 FPS (33ms)
             if silence_counter > 40 {
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(Duration::from_millis(100));
             } else {
-                std::thread::sleep(Duration::from_millis(16)); // ~60 FPS
+                std::thread::sleep(Duration::from_millis(33)); // ~30 FPS
             }
         }
     }

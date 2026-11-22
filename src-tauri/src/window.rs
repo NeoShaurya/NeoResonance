@@ -8,7 +8,7 @@ use windows::Win32::{
     Foundation::HWND,
     UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_BOTTOM,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_TOOLWINDOW,
     },
 };
 
@@ -19,11 +19,9 @@ pub fn setup_desktop_window(window: &WebviewWindow, config: &WidgetConfig) {
         let hwnd = HWND(raw_hwnd.0 as _);
 
         unsafe {
-            // 1. Set extended styles: WS_EX_TOOLWINDOW (hides from Alt+Tab) & WS_EX_NOACTIVATE (no focus steal)
+            // 1. Set extended styles: WS_EX_TOOLWINDOW (hides from Alt+Tab)
             let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let target_ex_style = ex_style
-                | (WS_EX_TOOLWINDOW.0 as isize)
-                | (WS_EX_NOACTIVATE.0 as isize);
+            let target_ex_style = ex_style | (WS_EX_TOOLWINDOW.0 as isize);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, target_ex_style);
 
             // 2. Position window
@@ -74,7 +72,6 @@ pub fn setup_system_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
     if let Some(icon) = app.default_window_icon() {
         tray_builder = tray_builder.icon(icon.clone());
     } else {
-        // Fallback: 16x16 cyan dot
         let mut pixels = Vec::with_capacity(16 * 16 * 4);
         for _ in 0..(16 * 16) {
             pixels.extend_from_slice(&[6, 182, 212, 255]); // #06b6d4 cyan

@@ -6,7 +6,6 @@ pub mod window;
 
 use config::{load_config, ConfigState};
 use lyrics::LyricsCache;
-use smtc::SmtcState;
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -39,8 +38,8 @@ pub fn run() {
 
             // Setup SMTC
             log("Setting up SMTC");
-            let smtc_manager = smtc::setup_smtc(app.handle().clone());
-            app.manage(SmtcState(smtc_manager));
+            let smtc_state = smtc::setup_smtc(app.handle().clone());
+            app.manage(smtc_state);
             log("SMTC managed");
 
             // Setup desktop window

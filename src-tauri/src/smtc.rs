@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use windows::{
-    Foundation::{TimeSpan, TypedEventHandler},
+    Foundation::TimeSpan,
     Media::Control::{
         GlobalSystemMediaTransportControlsSession,
         GlobalSystemMediaTransportControlsSessionManager,
@@ -45,7 +45,11 @@ impl Default for SmtcMediaState {
     }
 }
 
-pub struct SmtcState(pub Arc<Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>>>);
+#[derive(Clone)]
+pub struct SmtcState {
+    pub manager: Arc<Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>>>,
+    pub cached_state: Arc<Mutex<SmtcMediaState>>,
+}
 
 fn current_unix_ms() -> u64 {
     SystemTime::now()
@@ -66,8 +70,39 @@ fn status_to_string(status: GlobalSystemMediaTransportControlsSessionPlaybackSta
     }
 }
 
+fn extract_album_art(session: &GlobalSystemMediaTransportControlsSession) -> Option<String> {
+    let media_props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+    let thumb_ref = media_props.Thumbnail().ok()?;
+    let stream = thumb_ref.OpenReadAsync().ok()?.get().ok()?;
+    let size = stream.Size().ok()? as u32;
+    if size == 0 {
+        return None;
+    }
+
+    let content_type = stream.ContentType().map(|s| s.to_string()).unwrap_or_default();
+    let mime = if content_type.contains("png") {
+        "image/png"
+    } else if content_type.contains("webp") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    };
+
+    let reader = DataReader::CreateDataReader(&stream).ok()?;
+    reader.SetInputStreamOptions(InputStreamOptions::None).ok()?;
+    reader.LoadAsync(size).ok()?.get().ok()?;
+
+    let mut buffer = vec![0u8; size as usize];
+    reader.ReadBytes(&mut buffer).ok()?;
+
+    let base64_str = BASE64.encode(&buffer);
+    Some(format!("data:{};base64,{}", mime, base64_str))
+}
+
 pub fn extract_media_state(
     session: &GlobalSystemMediaTransportControlsSession,
+    cached_art: Option<String>,
+    track_changed: bool,
 ) -> Option<SmtcMediaState> {
     let app_id = session
         .SourceAppUserModelId()
@@ -85,34 +120,12 @@ pub fn extract_media_state(
         .map(|s| s.to_string())
         .unwrap_or_default();
 
-    // Read album art thumbnail
-    let album_art = (|| -> Option<String> {
-        let thumb_ref = media_props.Thumbnail().ok()?;
-        let stream = thumb_ref.OpenReadAsync().ok()?.get().ok()?;
-        let size = stream.Size().ok()? as u32;
-        if size == 0 {
-            return None;
-        }
-
-        let content_type = stream.ContentType().map(|s| s.to_string()).unwrap_or_default();
-        let mime = if content_type.contains("png") {
-            "image/png"
-        } else if content_type.contains("webp") {
-            "image/webp"
-        } else {
-            "image/jpeg"
-        };
-
-        let reader = DataReader::CreateDataReader(&stream).ok()?;
-        reader.SetInputStreamOptions(InputStreamOptions::None).ok()?;
-        reader.LoadAsync(size).ok()?.get().ok()?;
-
-        let mut buffer = vec![0u8; size as usize];
-        reader.ReadBytes(&mut buffer).ok()?;
-
-        let base64_str = BASE64.encode(&buffer);
-        Some(format!("data:{};base64,{}", mime, base64_str))
-    })();
+    // Only extract album art over COM when track changed or not yet cached
+    let album_art = if track_changed || cached_art.is_none() {
+        extract_album_art(session)
+    } else {
+        cached_art
+    };
 
     let timeline = session.GetTimelineProperties().ok();
     let (position_ms, duration_ms, last_updated_ms) = if let Some(t) = timeline {
@@ -140,90 +153,116 @@ pub fn extract_media_state(
     })
 }
 
-pub fn fetch_current_state(
-    manager_arc: &Arc<Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>>>,
-) -> SmtcMediaState {
-    let lock = manager_arc.lock().unwrap();
-    if let Some(ref manager) = *lock {
-        if let Ok(session) = manager.GetCurrentSession() {
-            return extract_media_state(&session).unwrap_or_default();
-        }
-    }
-    SmtcMediaState::default()
-}
-
-pub fn update_and_emit(
-    app: &AppHandle,
-    manager_arc: &Arc<Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>>>,
-    last_state: &mut SmtcMediaState,
-) {
-    let new_state = fetch_current_state(manager_arc);
-    // Emit if title, artist, playback_status, or track changed, or if position jumped significantly
-    let changed = new_state.title != last_state.title
-        || new_state.artist != last_state.artist
-        || new_state.playback_status != last_state.playback_status
-        || new_state.album_art != last_state.album_art
-        || (new_state.position_ms as i64 - last_state.position_ms as i64).abs() > 3000;
-
-    if changed {
-        *last_state = new_state.clone();
-        let _ = app.emit("smtc_state", new_state);
-    }
-}
-
-pub fn setup_smtc(app: AppHandle) -> Arc<Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>>> {
+pub fn setup_smtc(app: AppHandle) -> SmtcState {
     let manager_arc = Arc::new(Mutex::new(None));
-    let manager_arc_clone = Arc::clone(&manager_arc);
+    let cached_state = Arc::new(Mutex::new(SmtcMediaState::default()));
 
-    let app_handle_clone = app.clone();
-    std::thread::spawn(move || {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
+    let mgr_clone = Arc::clone(&manager_arc);
+    let state_clone = Arc::clone(&cached_state);
+    let app_handle = app.clone();
 
-        let request_async = GlobalSystemMediaTransportControlsSessionManager::RequestAsync();
-        if let Ok(async_op) = request_async {
-            if let Ok(manager) = async_op.get() {
-                let app_inner = app_handle_clone.clone();
-                let mgr_inner = Arc::clone(&manager_arc_clone);
-
-                // Register CurrentSessionChanged
-                let handler = TypedEventHandler::new(move |_manager, _args| {
-                    let mut dummy = SmtcMediaState::default();
-                    update_and_emit(&app_inner, &mgr_inner, &mut dummy);
-                    Ok(())
-                });
-
-                let _ = manager.CurrentSessionChanged(&handler);
-
-                *manager_arc_clone.lock().unwrap() = Some(manager);
-
-                // Background polling ticker loop (every 800ms) for rock-solid sync
-                let mut last_emitted = SmtcMediaState::default();
-                loop {
-                    update_and_emit(&app_handle_clone, &manager_arc_clone, &mut last_emitted);
-                    std::thread::sleep(Duration::from_millis(800));
-                }
+    std::thread::Builder::new()
+        .name("smtc-polling-thread".into())
+        .spawn(move || {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             }
-        }
-    });
 
-    manager_arc
+            let mut last_title = String::new();
+            let mut last_artist = String::new();
+            let mut last_status = String::new();
+            let mut cached_art: Option<String> = None;
+            let mut last_pos = 0u64;
+
+            loop {
+                // Ensure session manager is initialized
+                let mgr_opt = { mgr_clone.lock().unwrap().clone() };
+                let manager = match mgr_opt {
+                    Some(m) => m,
+                    None => {
+                        if let Ok(req) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+                            if let Ok(m) = req.get() {
+                                *mgr_clone.lock().unwrap() = Some(m.clone());
+                                m
+                            } else {
+                                std::thread::sleep(Duration::from_millis(500));
+                                continue;
+                            }
+                        } else {
+                            std::thread::sleep(Duration::from_millis(500));
+                            continue;
+                        }
+                    }
+                };
+
+                // Poll current session
+                if let Ok(session) = manager.GetCurrentSession() {
+                    let pb_info = session.GetPlaybackInfo().ok();
+                    let cur_status = pb_info
+                        .and_then(|i| i.PlaybackStatus().ok())
+                        .map(status_to_string)
+                        .unwrap_or_else(|| "Idle".into());
+
+                    let props = session.TryGetMediaPropertiesAsync().ok().and_then(|op| op.get().ok());
+                    let cur_title = props.as_ref().and_then(|p| p.Title().ok()).map(|s| s.to_string()).unwrap_or_default();
+                    let cur_artist = props.as_ref().and_then(|p| p.Artist().ok()).map(|s| s.to_string()).unwrap_or_default();
+
+                    let track_changed = cur_title != last_title || cur_artist != last_artist;
+                    let status_changed = cur_status != last_status;
+
+                    if track_changed {
+                        cached_art = None; // Reset cached thumbnail on track change
+                    }
+
+                    if let Some(new_state) = extract_media_state(&session, cached_art.clone(), track_changed) {
+                        cached_art = new_state.album_art.clone();
+                        last_title = new_state.title.clone();
+                        last_artist = new_state.artist.clone();
+                        last_status = new_state.playback_status.clone();
+
+                        let pos_jump = (new_state.position_ms as i64 - last_pos as i64).abs() > 2000;
+                        last_pos = new_state.position_ms;
+
+                        if track_changed || status_changed || pos_jump {
+                            *state_clone.lock().unwrap() = new_state.clone();
+                            let _ = app_handle.emit("smtc_state", new_state);
+                        }
+                    }
+                } else {
+                    // No current session
+                    if !last_title.is_empty() {
+                        last_title.clear();
+                        last_artist.clear();
+                        last_status = "Idle".into();
+                        cached_art = None;
+                        let default_state = SmtcMediaState::default();
+                        *state_clone.lock().unwrap() = default_state.clone();
+                        let _ = app_handle.emit("smtc_state", default_state);
+                    }
+                }
+
+                std::thread::sleep(Duration::from_millis(400));
+            }
+        })
+        .expect("failed to spawn smtc polling thread");
+
+    SmtcState {
+        manager: manager_arc,
+        cached_state,
+    }
 }
 
 #[tauri::command]
 pub fn get_smtc_state(state: tauri::State<'_, SmtcState>) -> SmtcMediaState {
-    fetch_current_state(&state.0)
+    state.cached_state.lock().unwrap().clone()
 }
 
 #[tauri::command]
-pub fn media_play_pause(state: tauri::State<'_, SmtcState>, app: AppHandle) -> Result<bool, String> {
-    let lock = state.0.lock().unwrap();
-    if let Some(ref manager) = *lock {
+pub async fn media_play_pause(state: tauri::State<'_, SmtcState>) -> Result<bool, String> {
+    let mgr_opt = { state.manager.lock().unwrap().clone() };
+    if let Some(manager) = mgr_opt {
         if let Ok(session) = manager.GetCurrentSession() {
             let _ = session.TryTogglePlayPauseAsync().map_err(|e| e.to_string())?.get();
-            let mut dummy = SmtcMediaState::default();
-            update_and_emit(&app, &state.0, &mut dummy);
             return Ok(true);
         }
     }
@@ -231,13 +270,11 @@ pub fn media_play_pause(state: tauri::State<'_, SmtcState>, app: AppHandle) -> R
 }
 
 #[tauri::command]
-pub fn media_next(state: tauri::State<'_, SmtcState>, app: AppHandle) -> Result<bool, String> {
-    let lock = state.0.lock().unwrap();
-    if let Some(ref manager) = *lock {
+pub async fn media_next(state: tauri::State<'_, SmtcState>) -> Result<bool, String> {
+    let mgr_opt = { state.manager.lock().unwrap().clone() };
+    if let Some(manager) = mgr_opt {
         if let Ok(session) = manager.GetCurrentSession() {
             let _ = session.TrySkipNextAsync().map_err(|e| e.to_string())?.get();
-            let mut dummy = SmtcMediaState::default();
-            update_and_emit(&app, &state.0, &mut dummy);
             return Ok(true);
         }
     }
@@ -245,13 +282,11 @@ pub fn media_next(state: tauri::State<'_, SmtcState>, app: AppHandle) -> Result<
 }
 
 #[tauri::command]
-pub fn media_prev(state: tauri::State<'_, SmtcState>, app: AppHandle) -> Result<bool, String> {
-    let lock = state.0.lock().unwrap();
-    if let Some(ref manager) = *lock {
+pub async fn media_prev(state: tauri::State<'_, SmtcState>) -> Result<bool, String> {
+    let mgr_opt = { state.manager.lock().unwrap().clone() };
+    if let Some(manager) = mgr_opt {
         if let Ok(session) = manager.GetCurrentSession() {
             let _ = session.TrySkipPreviousAsync().map_err(|e| e.to_string())?.get();
-            let mut dummy = SmtcMediaState::default();
-            update_and_emit(&app, &state.0, &mut dummy);
             return Ok(true);
         }
     }
@@ -259,17 +294,15 @@ pub fn media_prev(state: tauri::State<'_, SmtcState>, app: AppHandle) -> Result<
 }
 
 #[tauri::command]
-pub fn media_seek(state: tauri::State<'_, SmtcState>, app: AppHandle, position_ms: u64) -> Result<bool, String> {
-    let lock = state.0.lock().unwrap();
-    if let Some(ref manager) = *lock {
+pub async fn media_seek(state: tauri::State<'_, SmtcState>, position_ms: u64) -> Result<bool, String> {
+    let mgr_opt = { state.manager.lock().unwrap().clone() };
+    if let Some(manager) = mgr_opt {
         if let Ok(session) = manager.GetCurrentSession() {
             let duration_100ns = (position_ms as i64) * 10_000;
             let _ = session
                 .TryChangePlaybackPositionAsync(duration_100ns)
                 .map_err(|e| e.to_string())?
                 .get();
-            let mut dummy = SmtcMediaState::default();
-            update_and_emit(&app, &state.0, &mut dummy);
             return Ok(true);
         }
     }

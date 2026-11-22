@@ -17,6 +17,8 @@ target/
 src-tauri/target/
 src-tauri/gen/schemas
 *.exe
+*.zip
+NeoResonance-*/
 
 # Local user configs
 config.json

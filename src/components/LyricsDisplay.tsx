@@ -8,7 +8,7 @@ interface LyricsDisplayProps {
   visible: boolean;
 }
 
-export const LyricsDisplay: React.FC<LyricsDisplayProps> = ({
+export const LyricsDisplay: React.FC<LyricsDisplayProps> = React.memo(({
   progress,
   trackTitle,
   artist,
@@ -86,4 +86,4 @@ export const LyricsDisplay: React.FC<LyricsDisplayProps> = ({
       )}
     </div>
   );
-};
+});

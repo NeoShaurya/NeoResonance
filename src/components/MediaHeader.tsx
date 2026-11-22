@@ -20,7 +20,7 @@ function formatTime(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-export const MediaHeader: React.FC<MediaHeaderProps> = ({
+export const MediaHeader: React.FC<MediaHeaderProps> = React.memo(({
   smtc,
   isPlaying,
   onPlayPause,
@@ -137,4 +137,4 @@ export const MediaHeader: React.FC<MediaHeaderProps> = ({
       </div>
     </div>
   );
-};
+});
