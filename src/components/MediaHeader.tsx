@@ -43,11 +43,11 @@ export const MediaHeader: React.FC<MediaHeaderProps> = React.memo(({
   };
 
   return (
-    <div className="flex items-start justify-between w-full select-none pt-2 px-1">
+    <div className="flex items-start justify-between w-full select-none pt-0.5 px-0.5">
       {/* Media Identity Hub (Left) */}
-      <div className="flex items-center space-x-3.5 max-w-[55%]">
+      <div className="flex items-center space-x-3 max-w-[55%]">
         {/* Album Artwork */}
-        <div className="relative w-12 h-12 rounded-[14px] overflow-hidden flex-shrink-0 shadow-[0_6px_16px_rgba(0,0,0,0.5)] border border-white/15 bg-black/40 group">
+        <div className="relative w-11 h-11 rounded-[12px] overflow-hidden flex-shrink-0 shadow-[0_4px_14px_rgba(0,0,0,0.5)] border border-white/15 bg-black/40 group">
           {smtc.album_art ? (
             <img
               src={smtc.album_art}
@@ -56,7 +56,7 @@ export const MediaHeader: React.FC<MediaHeaderProps> = React.memo(({
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-900/60 to-blue-950/60">
-              <Disc className="w-6 h-6 text-white/50 animate-[spin_6s_linear_infinite]" />
+              <Disc className="w-5 h-5 text-white/50 animate-[spin_6s_linear_infinite]" />
             </div>
           )}
         </div>
@@ -65,14 +65,14 @@ export const MediaHeader: React.FC<MediaHeaderProps> = React.memo(({
         <div className="flex flex-col min-w-0 pr-2">
           <div className="overflow-hidden whitespace-nowrap">
             <span
-              className="text-[14px] font-semibold text-white tracking-tight inline-block truncate max-w-[260px] drop-shadow-sm"
+              className="text-[13px] font-semibold text-white tracking-tight inline-block truncate max-w-[260px] drop-shadow-sm"
               title={smtc.title}
             >
               {smtc.title || "No Media Playing"}
             </span>
           </div>
           <span
-            className="text-[11.5px] font-medium text-purple-200/70 truncate max-w-[260px] tracking-tight -mt-0.5"
+            className="text-[11px] font-medium text-purple-200/70 truncate max-w-[260px] tracking-tight -mt-0.5"
             title={smtc.artist || smtc.album}
           >
             {smtc.artist || (smtc.active ? "Unknown Artist" : "Idle")}
@@ -81,9 +81,9 @@ export const MediaHeader: React.FC<MediaHeaderProps> = React.memo(({
       </div>
 
       {/* Control Pod & Seeker (Right) */}
-      <div className="flex flex-col items-end space-y-1.5 pt-0.5">
+      <div className="flex flex-col items-end space-y-1 pt-0">
         {/* Micro Playback Controls */}
-        <div className="flex items-center space-x-3 pr-1">
+        <div className="flex items-center space-x-2.5 pr-1">
           <button
             onClick={onPrev}
             className="p-1 text-white/65 hover:text-white transition-colors duration-150 active:scale-90"
@@ -94,7 +94,7 @@ export const MediaHeader: React.FC<MediaHeaderProps> = React.memo(({
 
           <button
             onClick={onPlayPause}
-            className="w-8 h-8 rounded-full flex items-center justify-center bg-white/15 hover:bg-white/25 border border-white/30 text-white shadow-[0_0_14px_rgba(255,255,255,0.35)] transition-all duration-200 active:scale-90"
+            className="w-7.5 h-7.5 rounded-full flex items-center justify-center bg-white/15 hover:bg-white/25 border border-white/30 text-white shadow-[0_0_12px_rgba(255,255,255,0.35)] transition-all duration-200 active:scale-90"
             title={isPlaying ? "Pause" : "Play"}
           >
             {isPlaying ? (
@@ -114,7 +114,7 @@ export const MediaHeader: React.FC<MediaHeaderProps> = React.memo(({
         </div>
 
         {/* Ultra-Thin 2px Seeker Bar with Timestamps */}
-        <div className="flex flex-col items-end w-48 space-y-1">
+        <div className="flex flex-col items-end w-44 space-y-0.5">
           <div
             ref={progressBarRef}
             onClick={handleSeekClick}

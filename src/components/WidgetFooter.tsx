@@ -11,7 +11,7 @@ export const WidgetFooter: React.FC<WidgetFooterProps> = ({
   onToggleLock,
 }) => {
   return (
-    <div className="flex items-center justify-between w-full select-none pt-0.5 px-1">
+    <div className="flex items-center justify-between w-full select-none pt-0 px-0.5">
       {/* Bottom Left Lock State */}
       <button
         onClick={onToggleLock}

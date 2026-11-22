@@ -100,11 +100,11 @@ export const StringBaselineWave: React.FC<StringBaselineWaveProps> = ({
   if (!visible) return null;
 
   return (
-    <div className="w-full h-6 px-1 flex items-center justify-center pointer-events-none select-none">
+    <div className="w-full h-5 px-1 flex items-center justify-center pointer-events-none select-none">
       <canvas
         ref={canvasRef}
         width={660}
-        height={24}
+        height={20}
         className="w-full h-full block"
       />
     </div>
