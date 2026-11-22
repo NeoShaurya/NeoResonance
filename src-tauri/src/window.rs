@@ -1,131 +1,32 @@
-use std::sync::atomic::{AtomicIsize, Ordering};
 use tauri::{
+    image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow,
 };
-use windows::{
-    core::w,
-    Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
-        UI::WindowsAndMessaging::{
-            CallWindowProcW, EnumWindows, FindWindowExW, FindWindowW, GetWindowLongPtrW,
-            SendMessageTimeoutW, SetParent, SetWindowLongPtrW, SetWindowPos, GWLP_WNDPROC,
-            GWL_EXSTYLE, HWND_BOTTOM, SC_MINIMIZE, SMTO_NORMAL, SWP_NOACTIVATE, SWP_NOMOVE,
-            SWP_NOSIZE, WINDOWPOS, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING, WNDPROC,
-            WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-        },
+use windows::Win32::{
+    Foundation::HWND,
+    UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_BOTTOM,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     },
 };
 
 use crate::config::{save_config_to_disk, ConfigState, WidgetConfig};
-
-static ORIGINAL_WNDPROC: AtomicIsize = AtomicIsize::new(0);
-
-// Subclass window procedure to prevent Win+D minimization and keep at bottom
-unsafe extern "system" fn window_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    match msg {
-        WM_SYSCOMMAND => {
-            // Block minimize attempts (e.g. Win+D or show desktop signals)
-            if (wparam.0 as u32 & 0xFFF0) == SC_MINIMIZE {
-                return LRESULT(0);
-            }
-        }
-        WM_WINDOWPOSCHANGING => {
-            // Force bottom of Z-order
-            let winpos = &mut *(lparam.0 as *mut WINDOWPOS);
-            winpos.hwndInsertAfter = HWND_BOTTOM;
-        }
-        _ => {}
-    }
-
-    let orig = ORIGINAL_WNDPROC.load(Ordering::SeqCst);
-    if orig != 0 {
-        let orig_proc: WNDPROC = std::mem::transmute(orig);
-        CallWindowProcW(orig_proc, hwnd, msg, wparam, lparam)
-    } else {
-        LRESULT(0)
-    }
-}
 
 pub fn setup_desktop_window(window: &WebviewWindow, config: &WidgetConfig) {
     if let Ok(raw_hwnd) = window.hwnd() {
         let hwnd = HWND(raw_hwnd.0 as _);
 
         unsafe {
-            // 1. Set extended styles: WS_EX_TOOLWINDOW (hides from Alt+Tab) & WS_EX_NOACTIVATE
+            // 1. Set extended styles: WS_EX_TOOLWINDOW (hides from Alt+Tab) & WS_EX_NOACTIVATE (no focus steal)
             let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             let target_ex_style = ex_style
                 | (WS_EX_TOOLWINDOW.0 as isize)
                 | (WS_EX_NOACTIVATE.0 as isize);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, target_ex_style);
 
-            // 2. Desktop Attachment (survives Win+D)
-            let mut _attached = false;
-            let progman = FindWindowW(w!("Progman"), None);
-            if let Ok(progman_hwnd) = progman {
-                if !progman_hwnd.is_invalid() {
-                    // Send 0x052C to Progman to spawn a WorkerW
-                    let _ = SendMessageTimeoutW(
-                        progman_hwnd,
-                        0x052C,
-                        WPARAM(0xD),
-                        LPARAM(0x1),
-                        SMTO_NORMAL,
-                        1000,
-                        None,
-                    );
-
-                    struct FindWorkerWData {
-                        workerw: HWND,
-                    }
-
-                    unsafe extern "system" fn enum_windows_callback(
-                        top_hwnd: HWND,
-                        lparam: LPARAM,
-                    ) -> windows::Win32::Foundation::BOOL {
-                        let data = &mut *(lparam.0 as *mut FindWorkerWData);
-                        let shelldll = FindWindowExW(top_hwnd, None, w!("SHELLDLL_DefView"), None);
-                        if let Ok(shelldll_hwnd) = shelldll {
-                            if !shelldll_hwnd.is_invalid() {
-                                // Sibling workerw after this one is the wallpaper layer
-                                let workerw = FindWindowExW(None, top_hwnd, w!("WorkerW"), None);
-                                if let Ok(w_hwnd) = workerw {
-                                    if !w_hwnd.is_invalid() {
-                                        data.workerw = w_hwnd;
-                                        return windows::Win32::Foundation::BOOL(0);
-                                    }
-                                }
-                            }
-                        }
-                        windows::Win32::Foundation::BOOL(1)
-                    }
-
-                    let mut data = FindWorkerWData { workerw: HWND(std::ptr::null_mut()) };
-                    let _ = EnumWindows(
-                        Some(enum_windows_callback),
-                        LPARAM(&mut data as *mut _ as isize),
-                    );
-
-                    if !data.workerw.is_invalid() {
-                        let _ = SetParent(hwnd, data.workerw);
-                        _attached = true;
-                    }
-                }
-            }
-
-            // 3. Fallback or additional security: Subclass WndProc to catch SC_MINIMIZE & keep HWND_BOTTOM
-            let orig = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, window_proc as *const () as isize);
-            if orig != 0 {
-                ORIGINAL_WNDPROC.store(orig, Ordering::SeqCst);
-            }
-
-            // 4. Position window
+            // 2. Position window
             if let (Some(x), Some(y)) = (config.x, config.y) {
                 let _ = window.set_position(PhysicalPosition::new(x, y));
             } else {
@@ -138,7 +39,7 @@ pub fn setup_desktop_window(window: &WebviewWindow, config: &WidgetConfig) {
                 }
             }
 
-            // Anchor to bottom
+            // 3. Keep behind normal application windows (desktop overlay layer)
             let _ = SetWindowPos(
                 hwnd,
                 HWND_BOTTOM,
@@ -166,10 +67,22 @@ pub fn setup_system_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         .item(&quit_item)
         .build()?;
 
-    let _tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+    let mut tray_builder = TrayIconBuilder::new()
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(false);
+
+    if let Some(icon) = app.default_window_icon() {
+        tray_builder = tray_builder.icon(icon.clone());
+    } else {
+        // Fallback: 16x16 cyan dot
+        let mut pixels = Vec::with_capacity(16 * 16 * 4);
+        for _ in 0..(16 * 16) {
+            pixels.extend_from_slice(&[6, 182, 212, 255]); // #06b6d4 cyan
+        }
+        tray_builder = tray_builder.icon(Image::new_owned(pixels, 16, 16));
+    }
+
+    let _tray = tray_builder
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();
             match id {

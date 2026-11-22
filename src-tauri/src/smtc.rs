@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use windows::{
     Foundation::{TimeSpan, TypedEventHandler},
@@ -11,9 +11,10 @@ use windows::{
         GlobalSystemMediaTransportControlsSessionPlaybackStatus,
     },
     Storage::Streams::{DataReader, InputStreamOptions},
+    Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SmtcMediaState {
     pub active: bool,
     pub title: String,
@@ -93,7 +94,15 @@ pub fn extract_media_state(
             return None;
         }
 
-        let content_type = stream.ContentType().map(|s| s.to_string()).unwrap_or_else(|_| "image/jpeg".into());
+        let content_type = stream.ContentType().map(|s| s.to_string()).unwrap_or_default();
+        let mime = if content_type.contains("png") {
+            "image/png"
+        } else if content_type.contains("webp") {
+            "image/webp"
+        } else {
+            "image/jpeg"
+        };
+
         let reader = DataReader::CreateDataReader(&stream).ok()?;
         reader.SetInputStreamOptions(InputStreamOptions::None).ok()?;
         reader.LoadAsync(size).ok()?.get().ok()?;
@@ -102,7 +111,7 @@ pub fn extract_media_state(
         reader.ReadBytes(&mut buffer).ok()?;
 
         let base64_str = BASE64.encode(&buffer);
-        Some(format!("data:{};base64,{}", content_type, base64_str))
+        Some(format!("data:{};base64,{}", mime, base64_str))
     })();
 
     let timeline = session.GetTimelineProperties().ok();
@@ -115,7 +124,7 @@ pub fn extract_media_state(
         (0, 0, current_unix_ms())
     };
 
-    let active = !title.is_empty() || playback_status == "Playing";
+    let active = !title.is_empty() || playback_status == "Playing" || playback_status == "Paused";
 
     Some(SmtcMediaState {
         active,
@@ -131,24 +140,35 @@ pub fn extract_media_state(
     })
 }
 
+pub fn fetch_current_state(
+    manager_arc: &Arc<Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>>>,
+) -> SmtcMediaState {
+    let lock = manager_arc.lock().unwrap();
+    if let Some(ref manager) = *lock {
+        if let Ok(session) = manager.GetCurrentSession() {
+            return extract_media_state(&session).unwrap_or_default();
+        }
+    }
+    SmtcMediaState::default()
+}
+
 pub fn update_and_emit(
     app: &AppHandle,
     manager_arc: &Arc<Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>>>,
+    last_state: &mut SmtcMediaState,
 ) {
-    let state = {
-        let lock = manager_arc.lock().unwrap();
-        if let Some(ref manager) = *lock {
-            if let Ok(session) = manager.GetCurrentSession() {
-                extract_media_state(&session).unwrap_or_default()
-            } else {
-                SmtcMediaState::default()
-            }
-        } else {
-            SmtcMediaState::default()
-        }
-    };
+    let new_state = fetch_current_state(manager_arc);
+    // Emit if title, artist, playback_status, or track changed, or if position jumped significantly
+    let changed = new_state.title != last_state.title
+        || new_state.artist != last_state.artist
+        || new_state.playback_status != last_state.playback_status
+        || new_state.album_art != last_state.album_art
+        || (new_state.position_ms as i64 - last_state.position_ms as i64).abs() > 3000;
 
-    let _ = app.emit("smtc_state", state);
+    if changed {
+        *last_state = new_state.clone();
+        let _ = app.emit("smtc_state", new_state);
+    }
 }
 
 pub fn setup_smtc(app: AppHandle) -> Arc<Mutex<Option<GlobalSystemMediaTransportControlsSessionManager>>> {
@@ -157,6 +177,10 @@ pub fn setup_smtc(app: AppHandle) -> Arc<Mutex<Option<GlobalSystemMediaTransport
 
     let app_handle_clone = app.clone();
     std::thread::spawn(move || {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        }
+
         let request_async = GlobalSystemMediaTransportControlsSessionManager::RequestAsync();
         if let Ok(async_op) = request_async {
             if let Ok(manager) = async_op.get() {
@@ -165,46 +189,21 @@ pub fn setup_smtc(app: AppHandle) -> Arc<Mutex<Option<GlobalSystemMediaTransport
 
                 // Register CurrentSessionChanged
                 let handler = TypedEventHandler::new(move |_manager, _args| {
-                    update_and_emit(&app_inner, &mgr_inner);
+                    let mut dummy = SmtcMediaState::default();
+                    update_and_emit(&app_inner, &mgr_inner, &mut dummy);
                     Ok(())
                 });
 
                 let _ = manager.CurrentSessionChanged(&handler);
 
-                // Attach events to current session if present
-                if let Ok(session) = manager.GetCurrentSession() {
-                    let app_for_props = app_handle_clone.clone();
-                    let mgr_for_props = Arc::clone(&manager_arc_clone);
-                    let _ = session.MediaPropertiesChanged(&TypedEventHandler::new(
-                        move |_session, _args| {
-                            update_and_emit(&app_for_props, &mgr_for_props);
-                            Ok(())
-                        },
-                    ));
-
-                    let app_for_pb = app_handle_clone.clone();
-                    let mgr_for_pb = Arc::clone(&manager_arc_clone);
-                    let _ = session.PlaybackInfoChanged(&TypedEventHandler::new(
-                        move |_session, _args| {
-                            update_and_emit(&app_for_pb, &mgr_for_pb);
-                            Ok(())
-                        },
-                    ));
-
-                    let app_for_tl = app_handle_clone.clone();
-                    let mgr_for_tl = Arc::clone(&manager_arc_clone);
-                    let _ = session.TimelinePropertiesChanged(&TypedEventHandler::new(
-                        move |_session, _args| {
-                            update_and_emit(&app_for_tl, &mgr_for_tl);
-                            Ok(())
-                        },
-                    ));
-                }
-
                 *manager_arc_clone.lock().unwrap() = Some(manager);
 
-                // Initial emission
-                update_and_emit(&app_handle_clone, &manager_arc_clone);
+                // Background polling ticker loop (every 800ms) for rock-solid sync
+                let mut last_emitted = SmtcMediaState::default();
+                loop {
+                    update_and_emit(&app_handle_clone, &manager_arc_clone, &mut last_emitted);
+                    std::thread::sleep(Duration::from_millis(800));
+                }
             }
         }
     });
@@ -214,21 +213,17 @@ pub fn setup_smtc(app: AppHandle) -> Arc<Mutex<Option<GlobalSystemMediaTransport
 
 #[tauri::command]
 pub fn get_smtc_state(state: tauri::State<'_, SmtcState>) -> SmtcMediaState {
-    let lock = state.0.lock().unwrap();
-    if let Some(ref manager) = *lock {
-        if let Ok(session) = manager.GetCurrentSession() {
-            return extract_media_state(&session).unwrap_or_default();
-        }
-    }
-    SmtcMediaState::default()
+    fetch_current_state(&state.0)
 }
 
 #[tauri::command]
-pub fn media_play_pause(state: tauri::State<'_, SmtcState>) -> Result<bool, String> {
+pub fn media_play_pause(state: tauri::State<'_, SmtcState>, app: AppHandle) -> Result<bool, String> {
     let lock = state.0.lock().unwrap();
     if let Some(ref manager) = *lock {
         if let Ok(session) = manager.GetCurrentSession() {
             let _ = session.TryTogglePlayPauseAsync().map_err(|e| e.to_string())?.get();
+            let mut dummy = SmtcMediaState::default();
+            update_and_emit(&app, &state.0, &mut dummy);
             return Ok(true);
         }
     }
@@ -236,11 +231,13 @@ pub fn media_play_pause(state: tauri::State<'_, SmtcState>) -> Result<bool, Stri
 }
 
 #[tauri::command]
-pub fn media_next(state: tauri::State<'_, SmtcState>) -> Result<bool, String> {
+pub fn media_next(state: tauri::State<'_, SmtcState>, app: AppHandle) -> Result<bool, String> {
     let lock = state.0.lock().unwrap();
     if let Some(ref manager) = *lock {
         if let Ok(session) = manager.GetCurrentSession() {
             let _ = session.TrySkipNextAsync().map_err(|e| e.to_string())?.get();
+            let mut dummy = SmtcMediaState::default();
+            update_and_emit(&app, &state.0, &mut dummy);
             return Ok(true);
         }
     }
@@ -248,11 +245,13 @@ pub fn media_next(state: tauri::State<'_, SmtcState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn media_prev(state: tauri::State<'_, SmtcState>) -> Result<bool, String> {
+pub fn media_prev(state: tauri::State<'_, SmtcState>, app: AppHandle) -> Result<bool, String> {
     let lock = state.0.lock().unwrap();
     if let Some(ref manager) = *lock {
         if let Ok(session) = manager.GetCurrentSession() {
             let _ = session.TrySkipPreviousAsync().map_err(|e| e.to_string())?.get();
+            let mut dummy = SmtcMediaState::default();
+            update_and_emit(&app, &state.0, &mut dummy);
             return Ok(true);
         }
     }
@@ -260,7 +259,7 @@ pub fn media_prev(state: tauri::State<'_, SmtcState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn media_seek(state: tauri::State<'_, SmtcState>, position_ms: u64) -> Result<bool, String> {
+pub fn media_seek(state: tauri::State<'_, SmtcState>, app: AppHandle, position_ms: u64) -> Result<bool, String> {
     let lock = state.0.lock().unwrap();
     if let Some(ref manager) = *lock {
         if let Ok(session) = manager.GetCurrentSession() {
@@ -269,6 +268,8 @@ pub fn media_seek(state: tauri::State<'_, SmtcState>, position_ms: u64) -> Resul
                 .TryChangePlaybackPositionAsync(duration_100ns)
                 .map_err(|e| e.to_string())?
                 .get();
+            let mut dummy = SmtcMediaState::default();
+            update_and_emit(&app, &state.0, &mut dummy);
             return Ok(true);
         }
     }
