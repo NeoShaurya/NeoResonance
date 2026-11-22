@@ -172,7 +172,8 @@ pub fn setup_smtc(app: AppHandle) -> SmtcState {
             let mut last_artist = String::new();
             let mut last_status = String::new();
             let mut cached_art: Option<String> = None;
-            let mut last_pos = 0u64;
+            let mut last_emitted_pos = 0u64;
+            let mut last_emit_time = current_unix_ms();
 
             loop {
                 // Ensure session manager is initialized
@@ -220,10 +221,14 @@ pub fn setup_smtc(app: AppHandle) -> SmtcState {
                         last_artist = new_state.artist.clone();
                         last_status = new_state.playback_status.clone();
 
-                        let pos_jump = (new_state.position_ms as i64 - last_pos as i64).abs() > 2000;
-                        last_pos = new_state.position_ms;
+                        let now = current_unix_ms();
+                        let time_since_emit = now.saturating_sub(last_emit_time);
+                        let is_seek = (new_state.position_ms as i64 - (last_emitted_pos as i64 + time_since_emit as i64)).abs() > 1500;
+                        let periodic_sync = new_state.playback_status == "Playing" && time_since_emit >= 2000;
 
-                        if track_changed || status_changed || pos_jump {
+                        if track_changed || status_changed || is_seek || periodic_sync {
+                            last_emit_time = now;
+                            last_emitted_pos = new_state.position_ms;
                             *state_clone.lock().unwrap() = new_state.clone();
                             let _ = app_handle.emit("smtc_state", new_state);
                         }

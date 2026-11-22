@@ -1,6 +1,6 @@
 Unicode true
 Name "NeoResonance"
-OutFile "C:\Users\shaur\NeoResonance\NeoResonance-Setup-v0.1.4.exe"
+OutFile "C:\Users\shaur\NeoResonance\NeoResonance-Setup-v0.1.5.exe"
 InstallDir "$LOCALAPPDATA\Programs\NeoResonance"
 RequestExecutionLevel user
 
