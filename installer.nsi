@@ -8,6 +8,10 @@ Page directory
 Page instfiles
 
 Section "Install"
+    nsExec::Exec 'taskkill /F /IM NeoResonance.exe'
+    nsExec::Exec 'taskkill /F /IM neo-resonance.exe'
+    Sleep 500
+
     SetOutPath "$INSTDIR"
     File /oname=NeoResonance.exe "C:\Users\shaur\NeoResonance\src-tauri\target\release\neo-resonance.exe"
     File "C:\Users\shaur\NeoResonance\src-tauri\target\release\WebView2Loader.dll"
@@ -21,6 +25,10 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+    nsExec::Exec 'taskkill /F /IM NeoResonance.exe'
+    nsExec::Exec 'taskkill /F /IM neo-resonance.exe'
+    Sleep 500
+
     Delete "$DESKTOP\NeoResonance.lnk"
     Delete "$SMPROGRAMS\NeoResonance\NeoResonance.lnk"
     Delete "$SMPROGRAMS\NeoResonance\Uninstall.lnk"
