@@ -17,10 +17,10 @@ export const AuraBackplate: React.FC<AuraBackplateProps> = ({
   if (!visible) return null;
 
   // Reactivity calculations for organic breathing
-  const bassScale = 1.0 + bassEnergy * 0.28;
-  const bassOpacity = 0.5 + bassEnergy * 0.45;
-  const midScale = 1.0 + midEnergy * 0.22;
-  const midOpacity = 0.45 + midEnergy * 0.4;
+  const bassScale = 1.0 + bassEnergy * 0.45;
+  const bassOpacity = 0.4 + bassEnergy * 0.6;
+  const midScale = 1.0 + midEnergy * 0.35;
+  const midOpacity = 0.4 + midEnergy * 0.55;
 
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-[24px] -z-10">

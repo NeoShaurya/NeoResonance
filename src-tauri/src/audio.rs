@@ -254,32 +254,54 @@ fn run_wasapi_capture(channel: Channel<AudioTelemetry>) {
             }
 
             // Bass & Mid normalization with fast attack, smooth decay
-            let target_bass = (raw_bass * 14.0).clamp(0.0, 1.0);
-            let target_mid = (raw_mid * 18.0).clamp(0.0, 1.0);
+            let target_bass = ((raw_bass * 28.0).powf(0.8)).clamp(0.0, 1.0);
+            let target_mid = ((raw_mid * 32.0).powf(0.8)).clamp(0.0, 1.0);
 
             if target_bass > smooth_bass {
-                smooth_bass = smooth_bass * 0.4 + target_bass * 0.6; // Quick hit
+                smooth_bass = smooth_bass * 0.35 + target_bass * 0.65; // Quick hit
             } else {
-                smooth_bass = smooth_bass * 0.88 + target_bass * 0.12; // Natural decay
+                smooth_bass = smooth_bass * 0.85 + target_bass * 0.15; // Natural decay
             }
 
             if target_mid > smooth_mid {
-                smooth_mid = smooth_mid * 0.5 + target_mid * 0.5;
+                smooth_mid = smooth_mid * 0.4 + target_mid * 0.6;
             } else {
-                smooth_mid = smooth_mid * 0.90 + target_mid * 0.10;
+                smooth_mid = smooth_mid * 0.88 + target_mid * 0.12;
             }
 
-            // 32-point physics string waveform
-            let step = FFT_SIZE / WAVE_POINTS;
+            // 32-point frequency spectrum envelope across log-spaced bands (35Hz to 14,000Hz)
+            let f_min = 35.0f32;
+            let f_max = 14000.0f32;
+            let max_bin = FFT_SIZE / 2;
+
             for p in 0..WAVE_POINTS {
-                let sample = ring_buffer[(ring_idx + p * step) % FFT_SIZE];
-                let target_val = if silence_counter > 15 {
+                let start_freq = f_min * (f_max / f_min).powf(p as f32 / WAVE_POINTS as f32);
+                let end_freq = f_min * (f_max / f_min).powf((p + 1) as f32 / WAVE_POINTS as f32);
+
+                let start_bin = ((start_freq / bin_hz).floor() as usize).clamp(1, max_bin - 1);
+                let end_bin = ((end_freq / bin_hz).ceil() as usize).clamp(start_bin + 1, max_bin);
+
+                let mut band_mag = 0.0f32;
+                for b in start_bin..end_bin {
+                    let mag = (fft_buffer[b].re.powi(2) + fft_buffer[b].im.powi(2)).sqrt() / (FFT_SIZE as f32 / 2.0);
+                    band_mag += mag;
+                }
+                band_mag /= (end_bin - start_bin) as f32;
+
+                // Frequency tilt compensation (pink noise falloff compensation)
+                let freq_boost = 1.0 + (p as f32 / WAVE_POINTS as f32) * 3.5;
+                let target_energy = if silence_counter > 15 {
                     0.0
                 } else {
-                    sample.clamp(-1.0, 1.0)
+                    ((band_mag * 36.0 * freq_boost).powf(0.75)).clamp(0.0, 1.0)
                 };
-                // Damped spring physics smoothing
-                smooth_wave[p] = smooth_wave[p] * 0.75 + target_val * 0.25;
+
+                // Fast attack, smooth liquid decay for fluid physics
+                if target_energy > smooth_wave[p] {
+                    smooth_wave[p] = smooth_wave[p] * 0.25 + target_energy * 0.75;
+                } else {
+                    smooth_wave[p] = smooth_wave[p] * 0.82 + target_energy * 0.18;
+                }
             }
 
             // Emit telemetry

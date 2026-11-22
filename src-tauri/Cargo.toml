@@ -1,6 +1,6 @@
 [package]
 name = "neo-resonance"
-version = "0.1.3"
+version = "0.1.4"
 description = "NeoResonance — Windows 11 Desktop Overlay Music Widget"
 authors = ["Shaurya Chandra <me@neoshaurya.com>"]
 edition = "2021"
